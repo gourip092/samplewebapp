@@ -1,58 +1,26 @@
-pipeline {
+pipeline{
     agent any
-       triggers {
-        pollSCM "* * * * *"
-       }
-    stages {
-        stage('Build Application') { 
-            steps {
-                echo '=== Building Petclinic Application ==='
-                sh 'mvn -B -DskipTests clean package' 
+    stages{
+        stage("Git SCM"){
+            steps{
+                git 'https://github.com/dgp999/declarativepipe.git'
             }
         }
-        stage('Test Application') {
-            steps {
-                echo '=== Testing Petclinic Application ==='
-                sh 'mvn test'
-            }
-            post {
-                always {
-                    junit 'target/surefire-reports/*.xml'
-                }
+        stage("Maven Build"){
+            steps{
+                sh "mvn clean package"
+                sh "mv target/*.war target/myweb.war"
             }
         }
-        stage('Build Docker Image') {
-            when {
-                branch 'master'
-            }
-            steps {
-                echo '=== Building Petclinic Docker Image ==='
-                script {
-                    app = docker.build("ibuchh/petclinic-spinnaker-jenkins")
-                }
-            }
-        }
-        stage('Push Docker Image') {
-            when {
-                branch 'master'
-            }
-            steps {
-                echo '=== Pushing Petclinic Docker Image ==='
-                script {
-                    GIT_COMMIT_HASH = sh (script: "git log -n 1 --pretty=format:'%H'", returnStdout: true)
-                    SHORT_COMMIT = "${GIT_COMMIT_HASH[0..7]}"
-                    docker.withRegistry('https://registry.hub.docker.com', 'dockerHubCredentials') {
-                        app.push("$SHORT_COMMIT")
-                        app.push("latest")
-                    }
-                }
-            }
-        }
-        stage('Remove local images') {
-            steps {
-                echo '=== Delete the local docker images ==='
-                sh("docker rmi -f ibuchh/petclinic-spinnaker-jenkins:latest || :")
-                sh("docker rmi -f ibuchh/petclinic-spinnaker-jenkins:$SHORT_COMMIT || :")
+        stage("Deploy"){
+            steps{
+			    sshagent(['TomcatServer']){
+			        sh """
+			        scp -o StrictHostKeyChecking=no target/myweb.war ec2-user@172.31.6.240:/opt/tomcat9/webapps/'
+                    ssh ec2-user@172.31.6.240 /opt/tomcat9/bin ./shutdown.sh
+                    ssh ec2-user@172.31.6.240 /opt/tomcat9/bin ./startup.sh
+                    """
+			    }
             }
         }
     }
